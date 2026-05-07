@@ -33,7 +33,7 @@ Anda diwajibkan untuk login terlebih dahulu untuk mendapatkan Token.
     ```json
     {
         "npm": "714240020",
-        "password": "password_anda"
+        "password": "Samuel"
     }
     ```
 > 📌 **PENTING**: Saat Anda klik "Send", API akan merespon dengan token panjang. **Copy token tersebut** untuk digunakan pada langkah B dan C.
@@ -49,7 +49,7 @@ Mengirimkan data hasil scan QR untuk memproses kehadiran.
     ```json
     {
         "mahasiswa_id": 4,
-        "qr_code": "5|83920"
+        "qr_code": "5"
     }
     ```
 

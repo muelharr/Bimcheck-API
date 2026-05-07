@@ -1,0 +1,561 @@
+openapi: 3.0.3
+
+# ============================================================================
+# BimCheck API — OpenAPI 3.0 Specification
+# Integrasi Web Service Validasi QR Code pada Sistem Bimbingan Mahasiswa
+# ============================================================================
+
+info:
+  title: BimCheck API
+  version: 1.0.0
+  description: |
+    **BimCheck API** adalah Web Service RESTful untuk validasi kehadiran bimbingan
+    skripsi berbasis QR Code. API ini merupakan layanan microservice mandiri yang
+    bertanggung jawab untuk memvalidasi QR Code, mencatat kehadiran mahasiswa,
+    dan menyediakan data riwayat bimbingan.
+
+    ## Konsep Microservice
+    BimCheck API dibangun sebagai **layanan independen** yang terpisah dari
+    aplikasi monolitik utama. Folder `api/` berisi seluruh kode web service
+    yang fokus pada satu tanggung jawab: validasi QR Code dan pencatatan
+    kehadiran. Layanan ini berkomunikasi melalui HTTP Request/Response
+    dengan format JSON, sehingga bisa dikonsumsi oleh klien manapun
+    (web, mobile, IoT scanner) tanpa bergantung pada antarmuka utama.
+
+    ## Arsitektur REST
+    API ini mengikuti prinsip REST (Representational State Transfer):
+    - **Stateless**: Setiap request membawa token autentikasi sendiri (tidak bergantung pada session server).
+    - **Resource-based URL**: Endpoint dirancang berdasarkan resource (`/checkin`, `/history`).
+    - **Metode HTTP Semantik**: POST untuk operasi yang mengubah data, GET untuk operasi baca.
+    - **Representasi JSON**: Seluruh pertukaran data menggunakan format JSON yang konsisten.
+
+    ## Pola IPO (Input → Process → Output)
+    Setiap endpoint mengikuti aliran data IPO:
+    1. **Input**: Klien mengirim HTTP Request berisi payload JSON + token autentikasi.
+    2. **Process**: Server memverifikasi token, memvalidasi input, lalu query ke database MySQL.
+    3. **Output**: Server mengembalikan HTTP Response JSON dengan status, pesan, dan data.
+
+    ## Teknologi
+    - PHP 8.1+ (Native, tanpa framework)
+    - MySQL 8.0 dengan Prepared Statements
+    - Token autentikasi berbasis HMAC-SHA256 (simulasi JWT)
+  contact:
+    name: BimCheck Developer Team
+    email: info@bimcheck.ac.id
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost/Bimcheck-API-API/api
+    description: Server Pengembangan Lokal (Laragon) — Akses via Router
+  - url: http://localhost/Bimcheck-API
+    description: Server Pengembangan Lokal (Laragon) — Akses Langsung
+
+# ============================================================================
+# SECURITY SCHEMES
+# ============================================================================
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Autentikasi menggunakan token berbasis HMAC-SHA256 (simulasi JWT).
+
+        **Cara mendapatkan token:**
+        1. Kirim request `POST` ke endpoint login dengan NPM dan password.
+        2. Jika berhasil, response akan berisi field `token`.
+        3. Sertakan token tersebut di header setiap request berikutnya:
+        ```
+        Authorization: Bearer <token_anda>
+        ```
+
+        **Struktur token:**
+        Token terdiri dari dua bagian yang dipisahkan titik:
+        `base64(payload).hmac_signature`
+
+        Payload berisi: `user_id`, `role`, `iat` (issued at), `exp` (expiry).
+        Token berlaku selama **24 jam** sejak diterbitkan.
+
+  # ==========================================================================
+  # REUSABLE SCHEMAS
+  # ==========================================================================
+  schemas:
+
+    LoginRequest:
+      type: object
+      required:
+        - npm
+        - password
+      properties:
+        npm:
+          type: string
+          example: "714240020"
+          description: Nomor Pokok Mahasiswa (NPM) sebagai identitas login.
+        password:
+          type: string
+          format: password
+          example: "password_anda"
+          description: Password akun mahasiswa.
+
+    CheckinRequest:
+      type: object
+      required:
+        - mahasiswa_id
+        - qr_code
+      properties:
+        mahasiswa_id:
+          type: integer
+          example: 4
+          description: ID unik mahasiswa yang melakukan check-in.
+        qr_code:
+          type: string
+          example: "5|83920"
+          description: |
+            Isi QR Code yang di-scan dari dosen pembimbing.
+            Format: `id_dosen|timestamp` — timestamp adalah time-based token
+            yang di-generate setiap 5 menit oleh sistem dosen.
+            Contoh: `5|83920` = dosen ID 5, timestamp 83920.
+
+    LoginSuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: success
+        message:
+          type: string
+          example: Login berhasil.
+        data:
+          type: object
+          properties:
+            token:
+              type: string
+              example: "eyJ1c2VyX2lkIjo0LCJyb2xlIjoibWFoYXNpc3dhIiwiaWF0IjoxNzA2NDAwMDAwLCJleHAiOjE3MDY0ODY0MDB9.a1b2c3d4e5f6..."
+              description: Token autentikasi untuk akses endpoint lainnya.
+            user:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 4
+                npm:
+                  type: string
+                  example: "714240020"
+                nama:
+                  type: string
+                  example: "Samuel Harry Priatno Lumbantoruan"
+                prodi:
+                  type: string
+                  example: "Teknik Informatika"
+                role:
+                  type: string
+                  example: "mahasiswa"
+
+    CheckinSuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: success
+        message:
+          type: string
+          example: Presensi Berhasil!
+        data:
+          type: object
+          properties:
+            id_antrian:
+              type: integer
+              example: 23
+            mahasiswa:
+              type: string
+              example: "Samuel Harry Priatno Lumbantoruan"
+            dosen:
+              type: string
+              example: "M. Yusril Helmi Setyawan, S.Kom., M.Kom.,SFPC."
+            nomor_antrian:
+              type: integer
+              example: 1
+            topik:
+              type: string
+              example: "Bimbingan web"
+            status:
+              type: string
+              example: "proses"
+            waktu_kehadiran:
+              type: string
+              format: date-time
+              example: "2026-01-27 23:35:38"
+
+    HistorySuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success]
+          example: success
+        message:
+          type: string
+          example: Riwayat bimbingan berhasil diambil.
+        data:
+          type: object
+          properties:
+            mahasiswa:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  example: 4
+                npm:
+                  type: string
+                  example: "714240020"
+                nama:
+                  type: string
+                  example: "Samuel Harry Priatno Lumbantoruan"
+                prodi:
+                  type: string
+                  example: "Teknik Informatika"
+            total_riwayat:
+              type: integer
+              example: 2
+            riwayat:
+              type: array
+              items:
+                $ref: "#/components/schemas/HistoryItem"
+
+    HistoryItem:
+      type: object
+      properties:
+        id_antrian:
+          type: integer
+          example: 23
+        nomor_antrian:
+          type: integer
+          example: 1
+        tanggal:
+          type: string
+          format: date
+          example: "2026-01-27"
+        waktu_mulai:
+          type: string
+          example: "23:35:00"
+        waktu_kehadiran:
+          type: string
+          format: date-time
+          example: "2026-01-27 23:35:38"
+        waktu_selesai:
+          type: string
+          format: date-time
+          example: "2026-01-27 23:35:44"
+        topik:
+          type: string
+          example: "Bimbingan web"
+        deskripsi:
+          type: string
+          nullable: true
+          example: null
+        catatan_dosen:
+          type: string
+          nullable: true
+          example: null
+        status:
+          type: string
+          enum: [selesai, dilewati, dibatalkan]
+          example: "selesai"
+        dosen:
+          type: object
+          properties:
+            id:
+              type: integer
+              example: 5
+            nama:
+              type: string
+              example: "M. Yusril Helmi Setyawan, S.Kom., M.Kom.,SFPC."
+            keahlian:
+              type: string
+              example: "Teknik Informatika"
+
+    ErrorResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [error]
+          example: error
+        message:
+          type: string
+          example: Terjadi kesalahan pada request.
+
+# ============================================================================
+# SECURITY (Global)
+# ============================================================================
+security:
+  - BearerAuth: []
+
+# ============================================================================
+# API PATHS / ENDPOINTS
+# ============================================================================
+paths:
+
+  # --------------------------------------------------------------------------
+  # LOGIN — via Router: POST /api/?action=login
+  #          via Direct: POST /api/auth.php
+  # --------------------------------------------------------------------------
+  /?action=login:
+    post:
+      tags:
+        - Autentikasi
+      summary: Login mahasiswa dan dapatkan token akses
+      description: |
+        Endpoint untuk autentikasi mahasiswa. Mengirimkan NPM dan password,
+        jika valid maka server mengembalikan token autentikasi.
+
+        **Akses Langsung:** `POST /api/auth.php`
+
+        **Pola IPO:**
+        - **Input:** JSON `{ "npm": "...", "password": "..." }`
+        - **Process:** Query tabel `mahasiswa`, verifikasi password dengan `password_verify()`
+        - **Output:** JSON berisi token + data user, atau pesan error
+      operationId: loginMahasiswa
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+            example:
+              npm: "714240020"
+              password: "password_anda"
+      responses:
+        "200":
+          description: Login berhasil, token dikembalikan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginSuccessResponse"
+        "400":
+          description: Field NPM atau password kosong.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                status: error
+                message: NPM dan password wajib diisi.
+        "401":
+          description: NPM atau password salah.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                status: error
+                message: NPM atau password salah.
+        "405":
+          description: Method selain POST tidak diizinkan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                status: error
+                message: Method tidak diizinkan. Gunakan POST.
+
+  # --------------------------------------------------------------------------
+  # CHECKIN — via Router: POST /api/?action=checkin
+  #           via Direct: POST /api/checkin.php
+  # --------------------------------------------------------------------------
+  /?action=checkin:
+    post:
+      tags:
+        - Check-In
+      summary: Validasi QR Code dan catat kehadiran bimbingan
+      description: |
+        Endpoint utama BimCheck API. Menerima data QR Code yang di-scan
+        oleh mahasiswa, memvalidasinya, lalu mencatat kehadiran.
+
+        **Akses Langsung:** `POST /api/checkin.php`
+
+        **Pola IPO:**
+        - **Input:** JSON `{ "mahasiswa_id": 4, "qr_code": "5|83920" }` + header Authorization
+        - **Process:**
+          1. Verifikasi token autentikasi
+          2. Parse QR Code (format: `id_dosen|timestamp`)
+          3. Validasi timestamp (toleransi ±10 menit)
+          4. Query tabel `antrian` — cek mahasiswa + dosen + tanggal hari ini
+          5. Update status antrian: `menunggu/dipanggil` → `proses`
+          6. Catat `waktu_kehadiran` dan insert `riwayat_status`
+        - **Output:** JSON status success/error + detail kehadiran
+
+        **Format QR Code:**
+        ```
+        id_dosen|timestamp
+        ```
+        Contoh: `5|83920` = Dosen ID 5, timestamp 83920 (dihitung dari `floor(time() / 300)`).
+        QR Code di-generate oleh sistem dosen dan berubah setiap 5 menit.
+      operationId: checkinMahasiswa
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckinRequest"
+            examples:
+              qr_with_timestamp:
+                summary: QR Code dengan time-based token
+                value:
+                  mahasiswa_id: 4
+                  qr_code: "5|83920"
+              qr_simple:
+                summary: QR Code sederhana (backward compatible)
+                value:
+                  mahasiswa_id: 4
+                  qr_code: "5"
+      responses:
+        "200":
+          description: Check-in berhasil, kehadiran tercatat di database.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CheckinSuccessResponse"
+        "400":
+          description: Input tidak valid atau QR Code kedaluwarsa.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                qr_expired:
+                  summary: QR Code kedaluwarsa
+                  value:
+                    status: error
+                    message: QR Code sudah kedaluwarsa. Minta dosen untuk refresh QR Code.
+                missing_fields:
+                  summary: Field wajib kosong
+                  value:
+                    status: error
+                    message: Field mahasiswa_id wajib diisi dan harus berupa angka positif.
+                invalid_format:
+                  summary: Format QR tidak valid
+                  value:
+                    status: error
+                    message: Format QR Code tidak valid.
+        "401":
+          description: Token tidak valid atau tidak disertakan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                status: error
+                message: Token tidak valid atau telah kedaluwarsa. Silakan login ulang.
+        "404":
+          description: Tidak ditemukan jadwal bimbingan yang sesuai.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              examples:
+                no_schedule:
+                  summary: Tidak ada jadwal hari ini
+                  value:
+                    status: error
+                    message: "Tidak ada jadwal bimbingan hari ini dengan dosen tersebut. Pastikan Anda sudah booking dan statusnya menunggu/dipanggil."
+                wrong_date:
+                  summary: Jadwal bukan hari ini
+                  value:
+                    status: error
+                    message: "Booking Anda dengan dosen ini dijadwalkan tanggal 28/01/2026, bukan hari ini. QR Code hanya bisa di-scan pada tanggal booking yang sesuai."
+
+  # --------------------------------------------------------------------------
+  # HISTORY — via Router: GET /api/?action=history&mahasiswa_id=4
+  #           via Direct: GET /api/history.php?mahasiswa_id=4
+  # --------------------------------------------------------------------------
+  /?action=history:
+    get:
+      tags:
+        - Riwayat
+      summary: Ambil daftar riwayat bimbingan mahasiswa
+      description: |
+        Mengambil seluruh data riwayat bimbingan mahasiswa yang telah selesai,
+        dilewati, atau dibatalkan. Data dikembalikan sebagai array JSON.
+
+        **Akses Langsung:** `GET /api/history.php?mahasiswa_id=4`
+
+        **Pola IPO:**
+        - **Input:** Query parameter `mahasiswa_id` + header Authorization
+        - **Process:** Verifikasi token → Query tabel `antrian` JOIN `dosen` → Filter status selesai
+        - **Output:** Array JSON berisi daftar riwayat + info mahasiswa + total data
+
+        Logika diekstrak dari `app/Models/Antrian.php` → method `getHistoryByMahasiswa()`.
+      operationId: getHistoryMahasiswa
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: mahasiswa_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            example: 4
+          description: |
+            ID mahasiswa yang riwayatnya ingin diambil.
+            Jika tidak diisi, otomatis menggunakan `user_id` dari token.
+      responses:
+        "200":
+          description: Riwayat bimbingan berhasil diambil.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HistorySuccessResponse"
+        "401":
+          description: Token tidak valid atau tidak disertakan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                status: error
+                message: Token tidak valid atau telah kedaluwarsa. Silakan login ulang.
+        "404":
+          description: Mahasiswa tidak ditemukan.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                status: error
+                message: Data mahasiswa tidak ditemukan.
+
+# ============================================================================
+# TAGS — Pengelompokan Endpoint
+# ============================================================================
+tags:
+  - name: Autentikasi
+    description: |
+      Endpoint login untuk mendapatkan token akses.
+      Token wajib disertakan di header `Authorization: Bearer <token>`
+      pada setiap request ke endpoint yang dilindungi.
+
+      **File:** `api/auth.php`
+  - name: Check-In
+    description: |
+      Endpoint utama untuk validasi QR Code dosen dan pencatatan
+      kehadiran mahasiswa. Mengubah status antrian dari
+      `menunggu`/`dipanggil` menjadi `proses`.
+
+      **File:** `api/checkin.php` — Diekstrak dari `actions/validasi_qr.php`
+  - name: Riwayat
+    description: |
+      Endpoint untuk mengambil data riwayat bimbingan mahasiswa
+      yang sudah selesai, dilewati, atau dibatalkan.
+
+      **File:** `api/history.php` — Diekstrak dari `app/Models/Antrian.php`

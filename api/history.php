@@ -13,37 +13,26 @@
  *   PROCESS → Verifikasi token → Query tabel antrian JOIN dosen → Filter selesai
  *   OUTPUT  → Array JSON berisi daftar riwayat bimbingan
  * 
- * Logika ini diekstrak dari: app/Models/Antrian.php → getHistoryByMahasiswa()
- * 
  * Contoh Request (Postman):
  *   GET http://localhost/Bimcheck/api/history.php?mahasiswa_id=4
  *   Headers:
  *     Authorization: Bearer <token_dari_login>
  */
 
-// Load konfigurasi API
 require_once __DIR__ . '/config.php';
 
-// ─── VALIDASI METHOD ────────────────────────────────────────────────────────
-// Endpoint riwayat menggunakan GET karena hanya membaca data (read-only)
-// Sesuai prinsip REST: GET = safe & idempotent
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     json_error('Method tidak diizinkan. Gunakan GET.', 405);
 }
 
-// ─── AUTENTIKASI TOKEN ──────────────────────────────────────────────────────
 $auth = require_auth();
 
-// ─── AMBIL PARAMETER ────────────────────────────────────────────────────────
-// mahasiswa_id diambil dari query string (?mahasiswa_id=4)
-// Jika tidak disediakan, gunakan user_id dari token yang sedang login
 $mahasiswa_id = (int) ($_GET['mahasiswa_id'] ?? $auth['user_id'] ?? 0);
 
 if ($mahasiswa_id <= 0) {
     json_error('Parameter mahasiswa_id wajib diisi dan harus berupa angka positif.', 400);
 }
 
-// ─── VALIDASI MAHASISWA ADA DI DATABASE ─────────────────────────────────────
 $mahasiswa = db_fetch(
     $conn,
     "SELECT id_mahasiswa, npm, nama, prodi FROM mahasiswa WHERE id_mahasiswa = ?",
@@ -55,12 +44,6 @@ if (!$mahasiswa) {
     json_error('Data mahasiswa tidak ditemukan.', 404);
 }
 
-// ─── QUERY RIWAYAT BIMBINGAN ────────────────────────────────────────────────
-// Logika diambil dari app/Models/Antrian.php → getHistoryByMahasiswa()
-// 
-// JOIN dengan tabel dosen untuk mendapatkan nama_dosen
-// Filter status: selesai, dilewati, dibatalkan (bukan yang masih aktif)
-// Diurutkan berdasarkan tanggal terbaru (DESC) agar riwayat terkini di atas
 $riwayat = db_fetch_all(
     $conn,
     "SELECT 
@@ -86,9 +69,6 @@ $riwayat = db_fetch_all(
     [$mahasiswa_id]
 );
 
-// ─── FORMAT DATA UNTUK RESPONSE ─────────────────────────────────────────────
-// Transformasi data mentah dari database menjadi format yang rapi
-// Casting tipe data agar konsisten (integer tetap integer, bukan string)
 $data_riwayat = [];
 foreach ($riwayat as $row) {
     $data_riwayat[] = [
@@ -110,7 +90,6 @@ foreach ($riwayat as $row) {
     ];
 }
 
-// ─── KIRIM RESPONSE ─────────────────────────────────────────────────────────
 json_success('Riwayat bimbingan berhasil diambil.', [
     'mahasiswa' => [
         'id'    => (int) $mahasiswa['id_mahasiswa'],
